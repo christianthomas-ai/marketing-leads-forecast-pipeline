@@ -2,7 +2,7 @@ name: Push Forecast to Google Sheets
 
 on:
   schedule:
-    - cron: '30 14 * * *'  # 9:30 AM Central (2:30 PM UTC) daily
+    - cron: '30 12 * * *'  # 7:30 AM Central (12:30 PM UTC) daily
   workflow_dispatch:  # allows manual trigger from GitHub Actions tab
 
 jobs:
@@ -29,4 +29,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python push_to_sheets.py
+        run: python push_
