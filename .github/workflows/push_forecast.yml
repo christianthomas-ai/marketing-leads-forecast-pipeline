@@ -2,7 +2,12 @@ name: Push Forecast to Google Sheets
 
 on:
   schedule:
-    - cron: '30 12 * * *'  # 7:30 AM Central (12:30 PM UTC) daily
+    # Scheduled to fire ~47 min after Looker's 4:30 AM CT webhook (Supabase
+    # Edge Function ingests + runs generate_forecast() in ~45 sec). Pins run to
+    # 5:17 AM Central. DST note: GitHub Actions cron is UTC and does NOT adjust
+    # for DST. Current value is correct during CDT (UTC-5). When the US returns
+    # to CST in November (UTC-6), change to '17 11 * * *' to stay at 5:17 AM CT.
+    - cron: '17 10 * * *'  # 5:17 AM Central (10:17 UTC) during CDT
   workflow_dispatch:  # allows manual trigger from GitHub Actions tab
 
 jobs:
