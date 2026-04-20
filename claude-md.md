@@ -9,15 +9,43 @@ Automated weekly leads forecasting pipeline replacing a manual Google Sheets mod
 ## Architecture
 
 ```
-Looker (scheduled daily 9AM) 
-  → Webhook (JSON — Simple format) 
-  → Supabase Edge Function (looker-leads-ingest, slug: bright-worker)
-  → Supabase PostgreSQL table (leads_weekly_actuals)
-  → SQL view (weekly_leads_by_bu) computes WoW, YoY, avg_wow_3yr
-  → SQL function (generate_forecast) produces baseline forecast
-  → Python script (push_to_sheets.py) pushes to Google Sheets
+Looker scheduled webhook (daily 4:30 AM CT)
+  → POST JSON (Simple format) to Supabase Edge Function (bright-worker)
+      → wipes + reloads leads_weekly_actuals
+      → calls generate_forecast() RPC (populates leads_forecast)
+  → GitHub Actions cron (daily 5:17 AM CT)
+      → runs push_to_sheets.py
+          → re-calls generate_forecast() as a belt-and-suspenders retry
+          → pulls leads_forecast
+          → writes to Google Sheets "Marketing Model - Live" / "Supabase Forecast" tab
   → Google Sheets remains the interactive control panel for manual adjustments
 ```
+
+Supporting SQL objects: `weekly_leads_by_bu` view (computes WoW, YoY,
+avg_wow_3yr); `generate_forecast()` PL/pgSQL function (produces baseline
+forecast into `leads_forecast`).
+
+## Pipeline Timing Chain
+
+End-to-end runs daily; the Monday 9 AM CT publish deadline drives the schedule.
+
+| Time (CT) | Event | Owned in |
+|---|---|---|
+| 4:30 AM | Looker webhook fires → POSTs to Edge Function | Looker UI → Schedules → *Marketing Model - KPIs (All Businesses) Webhook* |
+| ~4:31 AM | Edge Function finishes ingest (~42 sec for ~185K rows) and `generate_forecast()` (~1 sec) | Supabase → Edge Functions → `bright-worker` |
+| 5:17 AM | GitHub Actions cron fires `push_to_sheets.py` | `.github/workflows/push_forecast.yml` |
+| ~5:18 AM | Google Sheet updated | — |
+| 6:00 AM (Mon) | Apps Script force-recalc of Sheets model | Google Apps Script on the sheet |
+| 7–9 AM (Mon) | Review + manual overrides | Sheet |
+| 9:00 AM (Mon) | Forecast published | — |
+
+**Dependencies to respect when changing times:**
+- GH Actions cron must fire AFTER Looker + Edge Function complete. Do not move
+  the cron earlier than ~5 min after Looker's schedule without revisiting.
+- Apps Script recalc must fire AFTER push_to_sheets.py has written fresh data.
+- GitHub Actions cron runs in UTC and does NOT adjust for DST — update the cron
+  when DST flips (see inline comment in push_forecast.yml).
+- Looker webhook schedule is in Looker's UI; update there (not in this repo).
 
 ## Business Units
 - VT Core (largest)
@@ -147,6 +175,15 @@ PL/pgSQL function that:
 - Trims all key names (Looker adds leading spaces to some)
 - Wipes leads_weekly_actuals table, then inserts fresh data in batches of 500
 - Handles both single-space and double-space variants of Ad Spend column name
+- **After successful ingest, calls `generate_forecast()` RPC to regenerate
+  `leads_forecast` from the fresh actuals.**
+
+**Gotcha: silent forecast failure.** If `generate_forecast()` fails inside the
+Edge Function, the function still returns HTTP 200 to Looker with
+`forecast: "FAILED"` in the response body. Looker sees webhook success either
+way. Detection today relies on `push_to_sheets.py` re-calling the RPC (its
+failure mode is a loud GitHub Actions failure). Proper long-term fix is to
+return a non-2xx status from the Edge Function when the forecast step fails.
 
 ## Forecast Methodology
 
@@ -187,9 +224,14 @@ where:
 - Schedule name: Marketing Model - KPIs (All Businesses) Webhook
 - Destination: Webhook
 - Format: JSON — Simple
-- Trigger: Repeating interval, Daily at 9:00 AM
+- Trigger: Repeating interval, Daily at 4:30 AM CT
 - Filter: Reporting Date is on or after 2022/01/01
 - The webhook sends the FULL historical dataset daily; Edge Function wipes and reloads
+- Change history: previously 7:00 AM CT; moved to 4:30 AM CT on 2026-04-20 to
+  give the downstream pipeline enough buffer before the Monday 9 AM CT publish
+  deadline. If the Looker time changes again, also update the GitHub Actions
+  cron in `.github/workflows/push_forecast.yml` — it must fire AFTER the
+  Edge Function completes (typically ~45 seconds after Looker POSTs).
 
 ## Google Sheets Connection (in progress)
 
@@ -246,13 +288,15 @@ where:
 - Full year 2026 VT Core forecast (weeks 15-52) ties to Sheet's unadjusted total
 
 ## What's Left to Build
-1. **Finish Google Sheets connection** — push_to_sheets.py needs to be tested and debugged
-2. **Deploy to Netlify** — so the Python script runs on a schedule even when computer is off
+1. ~~**Finish Google Sheets connection**~~ — DONE; push_to_sheets.py runs daily via GitHub Actions
+2. ~~**Deploy to Netlify**~~ — SUPERSEDED; GitHub Actions handles scheduling now
 3. **Channel mix cascade** — Lead Source allocation using weighted CY/PY blend
 4. **Audience mix cascade** — same methodology applied to audiences within each channel
 5. **Manual adjustment layer** — forecast_adj table in Supabase that the Sheet can write to
-6. **Auto-run generate_forecast()** — trigger after daily data load via Edge Function or Netlify
+6. ~~**Auto-run generate_forecast()**~~ — DONE; Edge Function calls it after ingest (see Edge Functions section)
 7. **Add spend forecasting** — separate from leads, at BU × channel level
+8. **`forecast_vintages` table** — memorialize each vintage at full grain for audit / accuracy tracking (see PROJECT_MANIFEST when added)
+9. **Freshness / base-vs-final decomposition** — store forecast at each adjustment stage (base → +allocation → +holiday → +troas → +manual → final)
 
 ## Known Issues / Gotchas
 - Looker adds leading spaces to some JSON field names (" Reporting Date" instead of "Reporting Date")
