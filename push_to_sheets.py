@@ -2,6 +2,7 @@ import httpx
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
+from datetime import date, datetime
 import json
 import os
 
@@ -15,10 +16,75 @@ GOOGLE_CREDS_FILE = os.environ.get("GOOGLE_CREDS_FILE", "credentials.json")
 SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Marketing Model - Live")
 WORKSHEET_NAME = os.environ.get("WORKSHEET_NAME", "Supabase Forecast")
 
+# Max age (in days) of the most recent Reporting Date in leads_weekly_actuals
+# before we consider the Looker ingest stale and abort. Looker data is
+# typically T-1, and we run at 5:17 AM CT (after the 4:30 AM Looker fire), so
+# yesterday's date is expected. Threshold allows a small buffer for weekend
+# skips, late Looker runs, or Reporting Date vs ingest-time mismatch. Catches
+# "Looker never fired" and "Edge Function ingest failed silently" failure modes.
+MAX_ACTUALS_AGE_DAYS = int(os.environ.get("MAX_ACTUALS_AGE_DAYS", "3"))
+
 # Validate required env vars
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env file")
     exit(1)
+
+# ── STEP 0: Verify Looker ingest is fresh ──────────────────────────
+def check_actuals_freshness():
+    """Abort if leads_weekly_actuals hasn't been refreshed recently.
+
+    The upstream pipeline is: Looker webhook (4:30 AM CT) -> Supabase Edge
+    Function (bright-worker) wipes + reloads leads_weekly_actuals, then calls
+    generate_forecast(). If Looker fails to fire or the Edge Function errors
+    mid-insert, the actuals table ends up stale or empty, and the forecast
+    we'd push to Sheets would be yesterday's numbers. This guard turns that
+    silent failure into a loud one.
+    """
+    print("Checking leads_weekly_actuals freshness...")
+
+    resp = httpx.get(
+        f"{SUPABASE_URL}/rest/v1/leads_weekly_actuals",
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+        },
+        params={
+            "select": '"Reporting Date"',
+            "order": '"Reporting Date".desc.nullslast',
+            "limit": 1,
+        },
+        timeout=30,
+    )
+
+    if resp.status_code >= 400:
+        print(f"  ERROR: freshness check HTTP {resp.status_code} — {resp.text}")
+        print("  Cannot verify ingest state; aborting to avoid pushing stale data.")
+        exit(1)
+
+    rows = resp.json()
+    if not rows:
+        print("  ERROR: leads_weekly_actuals is EMPTY.")
+        print("  Likely the Edge Function wiped the table but the insert step failed.")
+        print("  Check Supabase Edge Function logs (bright-worker) for batch errors.")
+        exit(1)
+
+    max_date_str = rows[0].get("Reporting Date")
+    if not max_date_str:
+        print("  ERROR: Top row has no Reporting Date; table may be corrupt.")
+        exit(1)
+
+    max_date = datetime.strptime(max_date_str, "%Y-%m-%d").date()
+    age_days = (date.today() - max_date).days
+
+    if age_days > MAX_ACTUALS_AGE_DAYS:
+        print(f"  ERROR: Most recent Reporting Date is {max_date} ({age_days} days old).")
+        print(f"  Threshold is {MAX_ACTUALS_AGE_DAYS} days (set via MAX_ACTUALS_AGE_DAYS env var).")
+        print("  This usually means the Looker webhook did not fire (or the Edge Function")
+        print("  failed mid-ingest). Check Looker Schedules UI and Supabase Edge Function")
+        print("  logs (bright-worker) before re-running.")
+        exit(1)
+
+    print(f"  Most recent Reporting Date: {max_date} ({age_days} days old). OK.")
 
 # ── STEP 1: Run generate_forecast() in Supabase ────────────────────
 def run_forecast():
@@ -139,6 +205,9 @@ def push_to_sheets(rows):
 
 # ── MAIN ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Step 0: Verify upstream ingest before doing anything else
+    check_actuals_freshness()
+
     # Step 1: Try to regenerate forecast via RPC
     run_forecast()
 
@@ -148,6 +217,6 @@ if __name__ == "__main__":
         print("No forecast data found. Run generate_forecast() in Supabase SQL Editor first.")
         exit(1)
 
-    # Step 3: Push to Google Sheets
+    # Step 3: Push to Google Sheets 
     push_to_sheets(forecast_rows)
     print("\nAll done! Check your Google Sheet.")
