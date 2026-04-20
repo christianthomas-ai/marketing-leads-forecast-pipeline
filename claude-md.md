@@ -3,6 +3,9 @@
 ## Person
 Christian Thomas, Finance role at Varsity Tutors (subscription-based education business). New to Cursor, Python, and command line. Wants to do everything like a professional developer.
 
+## Companion doc
+[`PROJECT_MANIFEST.md`](./PROJECT_MANIFEST.md) — the target-state architecture, sequenced roadmap (Phases 1–5), open questions, and terminology glossary. This file (`claude-md.md`) is the *current-state* reference; the manifest is the *direction*.
+
 ## Project Overview
 Automated weekly leads forecasting pipeline replacing a manual Google Sheets model. The system pulls lead data from Looker, stores it in Supabase, computes a baseline forecast, and pushes results to Google Sheets.
 
