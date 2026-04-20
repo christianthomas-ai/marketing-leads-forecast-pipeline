@@ -88,7 +88,14 @@ def check_actuals_freshness():
 
 # ── STEP 1: Run generate_forecast() in Supabase ────────────────────
 def run_forecast():
-    """Call the generate_forecast() function via Supabase RPC."""
+    """Call generate_forecast() via Supabase RPC; abort on failure.
+
+    This is a retry of what the Edge Function already did post-ingest. It's
+    kept (not removed) as defense-in-depth: the Edge Function currently returns
+    HTTP 200 to Looker even when its internal forecast call fails, so this is
+    the only automated detection of a failed regen. If this call also fails,
+    we abort loudly rather than pushing a stale leads_forecast to Sheets.
+    """
     print("Running generate_forecast()...")
     try:
         resp = httpx.post(
@@ -101,14 +108,19 @@ def run_forecast():
             json={},
             timeout=120,
         )
-        if resp.status_code >= 400:
-            print(f"  WARNING: RPC returned {resp.status_code}. Run generate_forecast() manually in Supabase SQL Editor.")
-            return False
-        print("  Forecast generated successfully.")
-        return True
     except Exception as e:
-        print(f"  WARNING: Could not run forecast via RPC ({e}). Run manually in Supabase SQL Editor.")
-        return False
+        print(f"  ERROR: RPC call raised an exception: {e}")
+        print("  Aborting to avoid pushing a potentially stale forecast.")
+        print("  Run generate_forecast() manually in Supabase SQL Editor to investigate.")
+        exit(1)
+
+    if resp.status_code >= 400:
+        print(f"  ERROR: RPC returned HTTP {resp.status_code}: {resp.text}")
+        print("  Aborting to avoid pushing a potentially stale forecast.")
+        print("  Run generate_forecast() manually in Supabase SQL Editor to investigate.")
+        exit(1)
+
+    print("  Forecast generated successfully.")
 
 # ── STEP 2: Pull forecast data from Supabase ───────────────────────
 def fetch_forecast():
