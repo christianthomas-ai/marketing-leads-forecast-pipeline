@@ -298,7 +298,7 @@ where:
 5. **Manual adjustment layer** — forecast_adj table in Supabase that the Sheet can write to
 6. ~~**Auto-run generate_forecast()**~~ — DONE; Edge Function calls it after ingest (see Edge Functions section)
 7. **Add spend forecasting** — separate from leads, at BU × channel level
-8. **`forecast_vintages` table** — memorialize each vintage at full grain for audit / accuracy tracking (see PROJECT_MANIFEST when added)
+8. **`marketing_forecast_vintages` table** — memorialize each vintage at full grain for audit / accuracy tracking (live as of 2026-04-21; see `PHASE1_HANDOFF.md` and `supabase/migrations/2026-04-20_forecast_vintages.sql` + `2026-04-21_rename_marketing_tables.sql`)
 9. **Freshness / base-vs-final decomposition** — store forecast at each adjustment stage (base → +allocation → +holiday → +troas → +manual → final)
 
 ## Known Issues / Gotchas

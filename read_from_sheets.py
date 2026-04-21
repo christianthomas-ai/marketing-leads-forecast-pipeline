@@ -10,7 +10,7 @@ Designed for two uses:
      python read_from_sheets.py "Top Line" --head 20
      python read_from_sheets.py "Top Line" --render formatted --range A1:D5
 
-2. Module — importable by future scripts (e.g. the forecast_vintages write
+2. Module — importable by future scripts (e.g. the marketing_forecast_vintages write
    path, reconciliation checks, validation) without re-implementing auth:
      from read_from_sheets import read_worksheet, list_worksheets
      rows = read_worksheet("Top Line")                      # formulas

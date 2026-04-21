@@ -83,7 +83,7 @@ Build the Python engine in parallel with the existing Sheets model for 4–6 wee
 
 ### Forecast vintage table
 
-**`forecast_vintages`**
+**`marketing_forecast_vintages`** *(originally sketched as `forecast_vintages`; renamed 2026-04-21 for domain namespacing. The actual shipped schema uses plan_type x plan_start_date x forecast_date x business x lead_source x audience — see `supabase/migrations/2026-04-20_forecast_vintages.sql` for the real definition. The grain below is the older design sketch, kept for historical context.)*
 - Grain: `vintage_date × forecast_date × business × lead_channel × forecast_type`
 - Fields:
   - `vintage_date` (indexed)
@@ -221,7 +221,7 @@ With clean split, can test: does paid brand activity cannibalize or lift organic
 
 ### Phase 1 — Foundation (next)
 1. Validate memorialization snapshot trigger approach (Python job at ~7 AM CT Mondays, after Apps Script recalc, before 9 AM arrival).
-2. Settle `forecast_vintages` schema with validation layer.
+2. Settle `marketing_forecast_vintages` schema with validation layer.
 3. Build Python write function: Sheets API → pandas → Supabase upsert with validation.
 4. Run manually 2–4 weeks alongside existing publish; reconcile.
 5. Stand up `actuals` table in Supabase with daily × BU × lead_source × paid/organic split.
