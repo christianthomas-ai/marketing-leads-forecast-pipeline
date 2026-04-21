@@ -1,0 +1,122 @@
+name: Memorialize Locked Forecast
+
+# MANUAL TRIGGER ONLY during the 2-4 week shadow period (Phase 1 item 4).
+# Once the marketing_forecast_vintages pipeline has proven itself, uncomment
+# the `schedule` block below to run automatically every Monday at 7:00 AM CT
+# (after the 6 AM Apps Script recalc, before the 9 AM arrival deadline).
+#
+# DST note: GitHub Actions cron is UTC and does NOT adjust for DST.
+#   CDT (UTC-5, spring/summer): 12:00 UTC == 7:00 AM Central -> '0 12 * * 1'
+#   CST (UTC-6, fall/winter):   13:00 UTC == 7:00 AM Central -> '0 13 * * 1'
+#
+# Normal run: pick plan_type (SOP / OP / SOPM). plan_start_date is OPTIONAL —
+# leave blank and the script picks the newest plan_start_date in the locked
+# archive tab for that plan_type. Fill both in to pin a specific historical
+# vintage (backfill, re-memorialize, etc.).
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_type:
+        description: 'Plan type (SOP, OP, SOPM, etc.)'
+        required: true
+        default: 'SOP'
+      plan_start_date:
+        description: 'Sunday the plan goes into effect (YYYY-MM-DD). Blank = newest for plan_type.'
+        required: false
+        default: ''
+      locked_by:
+        description: 'Who locked this plan (e.g. christian.thomas)'
+        required: true
+        default: 'christian.thomas'
+      notes:
+        description: 'Freeform notes (optional)'
+        required: false
+        default: ''
+      supersede_reason:
+        description: 'Re-lock? Short human-readable reason. Leave blank for a new lock.'
+        required: false
+        default: ''
+      strict:
+        description: 'Fail on unknown business/lead_source/audience values'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      dry_run:
+        description: 'Dry run: read + validate only, no Supabase writes'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+  # Uncomment once the shadow period is over and trust is established:
+  # schedule:
+  #   - cron: '0 12 * * 1'  # 7:00 AM CT Mondays during CDT
+  #   # - cron: '0 13 * * 1'  # 7:00 AM CT Mondays during CST (swap in Nov)
+
+jobs:
+  memorialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write Google credentials file
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+
+      - name: Run memorialize_forecast.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # --plan-type + --locked-by are required; --plan-start-date is
+          # only passed through when the operator explicitly filled it in
+          # (otherwise the script picks the newest date for this plan_type).
+          ARGS=(
+            --plan-type "${{ github.event.inputs.plan_type }}"
+            --locked-by "${{ github.event.inputs.locked_by }}"
+          )
+          if [ -n "${{ github.event.inputs.plan_start_date }}" ]; then
+            ARGS+=(--plan-start-date "${{ github.event.inputs.plan_start_date }}")
+          fi
+          if [ -n "${{ github.event.inputs.notes }}" ]; then
+            ARGS+=(--notes "${{ github.event.inputs.notes }}")
+          fi
+          if [ -n "${{ github.event.inputs.supersede_reason }}" ]; then
+            ARGS+=(--supersede-reason "${{ github.event.inputs.supersede_reason }}")
+          fi
+          if [ "${{ github.event.inputs.strict }}" = "true" ]; then
+            ARGS+=(--strict)
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          python memorialize_forecast.py "${ARGS[@]}"
+
+      - name: Run reconcile_vintage.py
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # Same contract: plan_type required, plan_start_date optional.
+          RARGS=(--plan-type "${{ github.event.inputs.plan_type }}")
+          if [ -n "${{ github.event.inputs.plan_start_date }}" ]; then
+            RARGS+=(--plan-start-date "${{ github.event.inputs.plan_start_date }}")
+          fi
+          python reconcile_vintage.py "${RARGS[@]}"
