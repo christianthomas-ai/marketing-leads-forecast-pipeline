@@ -80,7 +80,7 @@ College & Grad, High School, ELD, Adult & Other, Prof Certs
 ### Project
 - Project name: Business Planning
 - Branch: main (PRODUCTION)
-- Project URL: https://tuhuajzagxuvkoxowsxo.supabase.co
+- Project URL: https://tuhuajzagxuvkxxowsxo.supabase.co
 - Region: us-east-1
 
 ### Tables
@@ -172,7 +172,7 @@ PL/pgSQL function that:
 ### Edge Functions
 
 #### looker-leads-ingest (slug: bright-worker)
-- URL: https://tuhuajzagxuvkoxowsxo.supabase.co/functions/v1/bright-worker
+- URL: https://tuhuajzagxuvkxxowsxo.supabase.co/functions/v1/bright-worker
 - JWT verification: OFF (required for Looker webhooks)
 - Receives Looker webhook POST with JSON — Simple format
 - Trims all key names (Looker adds leading spaces to some)
