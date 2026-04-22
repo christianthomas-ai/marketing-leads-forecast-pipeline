@@ -22,8 +22,8 @@ Examples:
 
 - `2026-04-20_forecast_vintages.sql`
 - `2026-04-21_rename_marketing_tables.sql`
+- `2026-04-22_marketing_calendar.sql`
 - `2026-05-04_add_troas_target_to_marketing_forecast_vintages.sql`
-- `2026-06-01_holiday_calendar.sql`
 
 ## How to apply a migration
 
@@ -99,3 +99,26 @@ Recommendation once permissions are unblocked: option 2. It reuses the
 Edge Function infrastructure that already exists for
 `leads_weekly_actuals`, has the right grain natively, and doesn't require
 maintaining a second integration surface.
+
+### `2026-04-22_marketing_calendar.sql` — ingest is `load_calendar.py`
+
+Creates a dense date dimension (`marketing_calendar`) populated from the
+Marketing Model "Calendar" tab. One row per date, 2022-2027 (~2,190 rows).
+The Python loader (`load_calendar.py`) reads:
+
+- `Calendar!B2:I3000` — date chain (col B) and Holiday Input (col I)
+- `Calendar!AI1:AM40` — holiday attribute lookup
+
+using `render='formula'` on both ranges (the live model's whole-sheet
+recalc times out on `unformatted`/`formatted`). The loader walks the
+`=B<prev>+1` date chain in Python, computes calendar primitives from the
+date, and evaluates the two known formula shapes in the AI:AM table
+(`=IF(<ref>=TRUE,FALSE,TRUE)` and
+`=IF(AND(<r1>=FALSE,<r2>=FALSE),TRUE,FALSE)`) symbolically.
+
+No consumer reads from this table today — it's inert until the Phase 3
+forecast adjustment layer is written. See `MODEL_STUDY_NOTES.md` §11.
+
+Re-runs are safe: the loader diffs each date's incoming row against the
+current DB row and supersedes only on actual change. First run inserts
+all ~2,190 rows; subsequent runs typically write zero.
