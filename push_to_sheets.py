@@ -18,7 +18,7 @@ WORKSHEET_NAME = os.environ.get("WORKSHEET_NAME", "Supabase Forecast")
 
 # Max age (in days) of the most recent Reporting Date in leads_weekly_actuals
 # before we consider the Looker ingest stale and abort. Looker data is
-# typically T-1, and we run at 5:17 AM CT (after the 4:30 AM Looker fire), so
+# typically T-1, and we run at 6:17 AM CT (after the 6:00 AM Looker fire), so
 # yesterday's date is expected. Threshold allows a small buffer for weekend
 # skips, late Looker runs, or Reporting Date vs ingest-time mismatch. Catches
 # "Looker never fired" and "Edge Function ingest failed silently" failure modes.
@@ -33,7 +33,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 def check_actuals_freshness():
     """Abort if leads_weekly_actuals hasn't been refreshed recently.
 
-    The upstream pipeline is: Looker webhook (4:30 AM CT) -> Supabase Edge
+    The upstream pipeline is: Looker webhook (6:00 AM CT) -> Supabase Edge
     Function (bright-worker) wipes + reloads leads_weekly_actuals, then calls
     generate_forecast(). If Looker fails to fire or the Edge Function errors
     mid-insert, the actuals table ends up stale or empty, and the forecast

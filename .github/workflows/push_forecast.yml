@@ -2,12 +2,20 @@ name: Push Forecast to Google Sheets
 
 on:
   schedule:
-    # Scheduled to fire ~47 min after Looker's 4:30 AM CT webhook (Supabase
+    # Scheduled to fire 17 min after Looker's 6:00 AM CT webhook (Supabase
     # Edge Function ingests + runs generate_forecast() in ~45 sec). Pins run to
-    # 5:17 AM Central. DST note: GitHub Actions cron is UTC and does NOT adjust
+    # 6:17 AM Central. DST note: GitHub Actions cron is UTC and does NOT adjust
     # for DST. Current value is correct during CDT (UTC-5). When the US returns
-    # to CST in November (UTC-6), change to '17 11 * * *' to stay at 5:17 AM CT.
-    - cron: '17 10 * * *'  # 5:17 AM Central (10:17 UTC) during CDT
+    # to CST in November (UTC-6), change to '17 12 * * *' to stay at 6:17 AM CT.
+    #
+    # Known delay caveat: GitHub-hosted scheduled runs are regularly delivered
+    # 3-5 hours late during US-morning peak (11:00-14:00 UTC). The Sheet update
+    # therefore typically lands ~10 AM CT in practice, not 6:17 AM CT. This is
+    # acceptable because push_to_sheets.py runs post-Looker either way; the
+    # cron time here is documented intent, not a delivery guarantee. Fixing the
+    # delay requires an event-driven trigger (Supabase Edge Function ->
+    # workflow_dispatch) which is blocked on Supabase org admin permissions.
+    - cron: '17 11 * * *'  # 6:17 AM Central (11:17 UTC) during CDT
   workflow_dispatch:  # allows manual trigger from GitHub Actions tab
 
 jobs:
