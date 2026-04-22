@@ -23,7 +23,7 @@ humans tweak. The final lock lives in Supabase (`marketing_forecast_vintages`).
 ┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐
 │ Looker          │    │ Supabase         │    │ Google Sheet     │
 │ (BI schedule)   │───▶│ (actuals+Python  │───▶│ (41 tabs,        │
-│ 4:30 AM CT      │    │  forecast RPC)   │    │  formula engine) │
+│ 6:00 AM CT      │    │  forecast RPC)   │    │  formula engine) │
 └─────────────────┘    └──────────────────┘    └──────────────────┘
                                                        │
                                                        ▼
@@ -278,7 +278,7 @@ for Sheet formulas until the full Python rewrite.
 ## 5. The Python / Supabase forecast pipeline
 
 **Upstream (Supabase, not in this repo):**
-1. Looker webhook (4:30 AM CT) → Edge Function `bright-worker`
+1. Looker webhook (6:00 AM CT) → Edge Function `bright-worker`
 2. Edge Function wipes + reloads `leads_weekly_actuals` in Supabase
 3. Edge Function calls `generate_forecast()` RPC → populates `leads_forecast` table
 

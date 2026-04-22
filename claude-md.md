@@ -12,11 +12,12 @@ Automated weekly leads forecasting pipeline replacing a manual Google Sheets mod
 ## Architecture
 
 ```
-Looker scheduled webhook (daily 4:30 AM CT)
+Looker scheduled webhook (daily 6:00 AM CT)
   → POST JSON (Simple format) to Supabase Edge Function (bright-worker)
       → wipes + reloads leads_weekly_actuals
       → calls generate_forecast() RPC (populates leads_forecast)
-  → GitHub Actions cron (daily 5:17 AM CT)
+  → GitHub Actions cron (daily 6:17 AM CT nominal; actually fires ~10 AM CT
+    due to GitHub scheduled-workflow delays — see push_forecast.yml comment)
       → runs push_to_sheets.py
           → re-calls generate_forecast() as a belt-and-suspenders retry
           → pulls leads_forecast
@@ -34,10 +35,10 @@ End-to-end runs daily; the Monday 9 AM CT publish deadline drives the schedule.
 
 | Time (CT) | Event | Owned in |
 |---|---|---|
-| 4:30 AM | Looker webhook fires → POSTs to Edge Function | Looker UI → Schedules → *Marketing Model - KPIs (All Businesses) Webhook* |
-| ~4:31 AM | Edge Function finishes ingest (~42 sec for ~185K rows) and `generate_forecast()` (~1 sec) | Supabase → Edge Functions → `bright-worker` |
-| 5:17 AM | GitHub Actions cron fires `push_to_sheets.py` | `.github/workflows/push_forecast.yml` |
-| ~5:18 AM | Google Sheet updated | — |
+| 6:00 AM | Looker webhook fires → POSTs to Edge Function | Looker UI → Schedules → *Marketing Model - KPIs (All Businesses) Webhook* |
+| ~6:01 AM | Edge Function finishes ingest (~42 sec for ~185K rows) and `generate_forecast()` (~1 sec) | Supabase → Edge Functions → `bright-worker` |
+| 6:17 AM (nominal) | GitHub Actions cron fires `push_to_sheets.py` | `.github/workflows/push_forecast.yml` |
+| ~10 AM (actual) | Google Sheet updated — GitHub scheduled-workflow delays consistently push actual delivery into the 15:00–17:00 UTC window | — |
 | 6:00 AM (Mon) | Apps Script force-recalc of Sheets model | Google Apps Script on the sheet |
 | 7–9 AM (Mon) | Review + manual overrides | Sheet |
 | 9:00 AM (Mon) | Forecast published | — |
@@ -46,9 +47,19 @@ End-to-end runs daily; the Monday 9 AM CT publish deadline drives the schedule.
 - GH Actions cron must fire AFTER Looker + Edge Function complete. Do not move
   the cron earlier than ~5 min after Looker's schedule without revisiting.
 - Apps Script recalc must fire AFTER push_to_sheets.py has written fresh data.
+  Current Apps Script timing (6:00 AM Mon) predates the Sheet update in
+  practice, since the Sheet update lands ~10 AM. Sheet review still happens
+  manually Mon 7–9 AM after the Sheet is updated; the recalc is a no-op safety
+  net at 6 AM. Fixing the GitHub cron delay (event-driven trigger) would
+  restore the intended 6:17 AM Sheet update → 6:00 AM recalc race, at which
+  point the Apps Script schedule would need to shift to, e.g., 6:30 AM Mon.
 - GitHub Actions cron runs in UTC and does NOT adjust for DST — update the cron
   when DST flips (see inline comment in push_forecast.yml).
 - Looker webhook schedule is in Looker's UI; update there (not in this repo).
+- Looker fires at 6:00 AM CT specifically because the upstream VT data
+  warehouse typically closes prior-day data between ~5:00 and ~6:00 AM CT.
+  Firing at 4:30 AM CT resulted in consistent T-2 data (warehouse hadn't
+  closed yet). Empirically confirmed 2026-04-22.
 
 ## Business Units
 - VT Core (largest)
@@ -227,14 +238,21 @@ where:
 - Schedule name: Marketing Model - KPIs (All Businesses) Webhook
 - Destination: Webhook
 - Format: JSON — Simple
-- Trigger: Repeating interval, Daily at 4:30 AM CT
+- Trigger: Repeating interval, Daily at 6:00 AM CT
 - Filter: Reporting Date is on or after 2022/01/01
 - The webhook sends the FULL historical dataset daily; Edge Function wipes and reloads
-- Change history: previously 7:00 AM CT; moved to 4:30 AM CT on 2026-04-20 to
-  give the downstream pipeline enough buffer before the Monday 9 AM CT publish
-  deadline. If the Looker time changes again, also update the GitHub Actions
-  cron in `.github/workflows/push_forecast.yml` — it must fire AFTER the
-  Edge Function completes (typically ~45 seconds after Looker POSTs).
+- Change history:
+  - previously 7:00 AM CT (original)
+  - moved to 4:30 AM CT on 2026-04-20 to give the downstream pipeline more
+    buffer before the Monday 9 AM CT publish deadline
+  - moved to 6:00 AM CT on 2026-04-22 after discovering 4:30 AM CT fired
+    before the VT warehouse had closed prior-day data, resulting in T-2 data
+    in Supabase instead of the intended T-1. Empirically: latest Reporting
+    Date was Apr 20 as of Wed Apr 22 morning, with Apr 21 missing entirely
+    despite Looker firing successfully.
+- If the Looker time changes again, also update the GitHub Actions cron in
+  `.github/workflows/push_forecast.yml` — it must fire AFTER the Edge Function
+  completes (typically ~45 seconds after Looker POSTs).
 
 ## Google Sheets Connection (in progress)
 

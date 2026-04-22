@@ -106,12 +106,20 @@ These predate Phase 1 and are blocked on Supabase org permissions. They don't
 block Phase 1, but both should get unblocked together when you have a minute
 with someone who has admin on the Supabase org:
 
-- Fresh GitHub PAT stored as Supabase `GITHUB_PAT` secret.
+- Fresh GitHub PAT stored as Supabase `GITHUB_PAT` secret. **BLOCKED** — your
+  Supabase org role is below Administrator. Dashboard banner ("You need
+  additional permissions to manage this project's edge function secrets") and
+  CLI (`supabase secrets set ... → "Your account does not have the necessary
+  privileges"`) both confirm this on 2026-04-22. Unblocked by elevating to
+  Administrator on the parent Supabase org (no billing impact).
 - `supabase functions download bright-worker` + add the ~15-line GitHub
-  `workflow_dispatch` call + redeploy.
-- Move `push_forecast.yml` cron from 5:17 AM → 5:43 AM CT as the safety net
-  once the event-driven path is live.
-- Freshness check in `push_to_sheets.py` (abort if `leads_forecast` is stale).
+  `workflow_dispatch` call + redeploy. Same admin blocker.
+- Move `push_forecast.yml` cron to a time AFTER Looker once the event-driven
+  path is live (cron becomes a pure safety net). Current cron is 6:17 AM CT
+  (after the 2026-04-22 shift from 5:17 AM); may need revisiting once
+  event-driven delivery is confirmed.
+- Freshness check in `push_to_sheets.py` — **DONE** (see `check_actuals_freshness()`,
+  added 2026-04-20 in commit d893290).
 
 Once those are done, `marketing_leads_daily_actuals` ingest (Phase 1 item 5)
 can use the same Edge Function scaffolding — that's why the recommendation in
