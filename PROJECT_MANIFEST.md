@@ -61,10 +61,12 @@ Build the Python engine in parallel with the existing Sheets model for 4–6 wee
 **`week_metadata`**
 - Per-week flags: holiday presence, anomalies, reporting change flags.
 
-**`holiday_calendar`**
-- Fields: `holiday_date`, `holiday_name`, `expected_leads_multiplier` by BU (holidays affect test prep vs Prof Certs differently).
-- Load and validate 2022–2030.
-- Single source of truth for all downstream holiday logic.
+**`marketing_calendar`** *(originally sketched as `holiday_calendar`; landed 2026-04-22 as a full dense date dimension rather than sparse-events-only — see `supabase/migrations/2026-04-22_marketing_calendar.sql` and `MODEL_STUDY_NOTES.md` §10 for the design rationale. The table co-locates event info with calendar primitives: one row per date 2022-2027, with event/classifier fields sparse and week-rollup fields dense.)*
+- Grain: one row per date (~2,190 rows for 6 years).
+- Event fields (sparse): `event_name`, `event_type` (holiday/test_release), `same_day_of_week`, `same_date`, `full_week_impact`.
+- Week rollup (dense, derived in loader): `week_event_name`, `week_has_full_week_impact`.
+- Loader: `load_calendar.py` (reads Sheet → upserts with soft-supersede on change).
+- **Deferred to Phase 3:** per-BU `expected_leads_multiplier` weightings. Those will land as a child table (`marketing_holiday_weightings`) once `marketing_leads_daily_actuals` is populated and we can derive weights from historical actuals rather than guess them.
 
 **`troas_targets`**
 - Fields: `effective_date`, `business`, `channel`, `troas_target`, `prior_troas` (for delta computation).
@@ -227,11 +229,11 @@ With clean split, can test: does paid brand activity cannibalize or lift organic
 5. Stand up `actuals` table in Supabase with daily × BU × lead_source × paid/organic split.
 
 ### Phase 2 — Adjustment infrastructure
-6. Build `holiday_calendar` in Supabase; load/validate 2022–2030 with per-BU multipliers.
+6. **[2026-04-22, landed]** Build `marketing_calendar` in Supabase (dense date dimension + event overlay); load 2022-2027 from the Sheet's Calendar tab. Loader at `load_calendar.py`. Per-BU holiday weightings deferred to Phase 3 (derived from actuals, not guessed).
 7. Build `troas_targets` table with effective-date history.
 8. Build `eltv_change_log` and `promo_log` tables.
 9. Build `google_campaign_lead_source_mapping` table.
-10. Google Sheets → Supabase push script for holiday and tROAS tables.
+10. Google Sheets → Supabase push script for tROAS tables (calendar already has one).
 
 ### Phase 3 — Python forecast engine
 11. Implement base model in Python (trend + allocation only, no adjustments). Reconcile against Sheets.
