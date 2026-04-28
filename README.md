@@ -66,10 +66,35 @@ GitHub Actions runs `push_to_sheets.py` at 5:17 AM CT. No manual intervention ne
 2. Review `holiday_weightings.csv`
 3. Commit to repo (CI reads this file)
 
+### Locking a forecast vintage (memorialization)
+Memorialization saves a point-in-time snapshot of the locked forecast plan to
+Supabase for audit and accuracy tracking. It is currently **manual trigger only**.
+
+1. Go to **Actions > Memorialize Locked Forecast** in GitHub
+2. Click **Run workflow**, fill in `plan_type` (e.g. SOP) and `locked_by`
+3. The workflow reads the Google Sheet's locked tab, validates, and upserts to
+   `marketing_forecast_vintages` in Supabase. A reconciliation step runs
+   automatically afterward.
+4. Check the workflow run for a green checkmark. If it fails, the error will
+   be in the run log (usually a missing plan in the sheet or a validation issue).
+
+**Enabling automatic weekly runs**: The schedule is ready but commented out in
+`memorialize_forecast.yml`. To activate it, uncomment these two lines:
+
+```yaml
+  schedule:
+    - cron: '0 12 * * 1'  # 7:00 AM CT Mondays during CDT (UTC-5)
+    - cron: '0 13 * * 1'  # 7:00 AM CT Mondays during CST (UTC-6)
+```
+
+A DST guard step is already in the workflow — both crons fire but only the one
+landing on 7 AM Central actually runs. No manual cron edits needed for
+daylight saving time.
+
 ## GitHub Actions
 
-- **Push Forecast** (`push_forecast.yml`): Daily cron + manual dispatch. Pushes adjusted forecast to Sheets.
-- **Memorialize Forecast** (`memorialize_forecast.yml`): Manual dispatch only. Locks a forecast vintage.
+- **Push Forecast** (`push_forecast.yml`): Daily cron + manual dispatch. Pushes adjusted forecast to Sheets. DST-safe (dual cron + guard).
+- **Memorialize Forecast** (`memorialize_forecast.yml`): Manual dispatch only (schedule ready to uncomment). Locks a forecast vintage + runs reconciliation.
 
 ## Deeper Documentation
 
