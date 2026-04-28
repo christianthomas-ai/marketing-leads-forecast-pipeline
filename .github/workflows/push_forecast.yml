@@ -2,18 +2,25 @@ name: Push Forecast to Google Sheets
 
 on:
   schedule:
-    # Scheduled to fire ~47 min after Looker's 4:30 AM CT webhook (Supabase
-    # Edge Function ingests + runs generate_forecast() in ~45 sec). Pins run to
-    # 5:17 AM Central. DST note: GitHub Actions cron is UTC and does NOT adjust
-    # for DST. Current value is correct during CDT (UTC-5). When the US returns
-    # to CST in November (UTC-6), change to '17 11 * * *' to stay at 5:17 AM CT.
-    - cron: '17 10 * * *'  # 5:17 AM Central (10:17 UTC) during CDT
+    # Both crons fire daily; the DST guard step (below) skips the run
+    # that doesn't land on 5 AM Central, so no manual swap is needed.
+    - cron: '17 10 * * *'  # 5:17 AM CT during CDT (UTC-5, Mar–Nov)
+    - cron: '17 11 * * *'  # 5:17 AM CT during CST (UTC-6, Nov–Mar)
   workflow_dispatch:  # allows manual trigger from GitHub Actions tab
 
 jobs:
   push-forecast:
     runs-on: ubuntu-latest
     steps:
+      - name: DST guard — skip if not 5 AM Central
+        if: github.event_name == 'schedule'
+        run: |
+          HOUR=$(TZ=America/Chicago date +%H)
+          if [ "$HOUR" != "05" ]; then
+            echo "Current Central hour is $HOUR, not 05. Skipping this DST duplicate."
+            exit 1
+          fi
+
       - name: Checkout repo
         uses: actions/checkout@v5
 

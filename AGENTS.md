@@ -361,3 +361,5 @@ of leads (`paid_mix` from trailing actuals).
 - ISO week numbers do NOT match the custom week calendar — always use the week_calendar table
 - `avg_wow_3yr` and `trailing_4wk_yoy` in the `leads_forecast` table are stored as **percentages** (e.g. 98.5 = 98.5%), not ratios — any code using them as multipliers must divide by 100
 - Bounce-back weeks (week after a holiday) are not explicitly tagged in the calendar; their contamination in avg_WoW_3yr is handled indirectly through the cascade propagation from the holiday week's correction
+- All historical lookups in `apply_adjustments` (WoW ratios, cascade, prior-week baseline) must be keyed by **(week_number, week_year, Business)** — using just (week_number, week_year) will cross-contaminate BUs with very different lead volumes
+- GitHub Actions DST handling is automated: both CDT and CST crons fire daily; a DST guard step skips the run that doesn't land on the target Central hour

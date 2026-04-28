@@ -311,7 +311,7 @@ def apply_adjustments(forecast_rows, cal, weightings, bid_adj, paid_mix):
         wn = r.get("week_number")
         wy = r.get("week_year")
         if wn is not None and wy is not None:
-            by_wn[(wn, wy)] = r
+            by_wn[(wn, wy, r["Business"])] = r
 
     bu_groups = defaultdict(list)
     for row in forecast_rows:
@@ -353,8 +353,8 @@ def apply_adjustments(forecast_rows, cal, weightings, bid_adj, paid_mix):
                 all_wows = []
                 ref_hol_flags = []
                 for yr in _WOW_YEARS:
-                    this_r = by_wn.get((wn, yr))
-                    prev_r = by_wn.get((prev_wn, yr + prev_wy_adj))
+                    this_r = by_wn.get((wn, yr, bu))
+                    prev_r = by_wn.get((prev_wn, yr + prev_wy_adj, bu))
                     if this_r and prev_r:
                         t = this_r.get("baseline_forecast") or 0
                         p = prev_r.get("baseline_forecast") or 0
@@ -367,7 +367,7 @@ def apply_adjustments(forecast_rows, cal, weightings, bid_adj, paid_mix):
                             ref_hol_flags.append((ref_fw, ref_ev))
 
                 if all_wows:
-                    prior_row = by_wn.get((prev_wn, wy + prev_wy_adj))
+                    prior_row = by_wn.get((prev_wn, wy + prev_wy_adj, bu))
                     prior_bl = (prior_row.get("baseline_forecast") or 0) if prior_row else 0
 
                     if cy_hol and cy_event:
@@ -409,7 +409,7 @@ def apply_adjustments(forecast_rows, cal, weightings, bid_adj, paid_mix):
                         if tw < 1:
                             tw += 52
                             ty -= 1
-                        tr = by_wn.get((tw, ty))
+                        tr = by_wn.get((tw, ty, bu))
                         if tr:
                             t_bl = tr.get("baseline_forecast") or 0
                             t_py = tr.get("py_leads") or 0
@@ -430,7 +430,7 @@ def apply_adjustments(forecast_rows, cal, weightings, bid_adj, paid_mix):
                 #     WoW component = 0.5 * prior_wk * avg_wow_3yr/100.
                 #     (avg_wow_3yr is stored as a percentage in the DB)
                 if avg_wow:
-                    prev_r = by_wn.get((prev_wn, wy + prev_wy_adj))
+                    prev_r = by_wn.get((prev_wn, wy + prev_wy_adj, bu))
                     if prev_r:
                         prev_ws = prev_r.get("week_start")
                         prev_adj = adj_map.get((prev_ws, bu), 0)
