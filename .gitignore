@@ -9,6 +9,15 @@ venv/
 __pycache__/
 *.pyc
 
+# Generated artifacts (re-created by analysis scripts)
+*.xlsx
+*.csv
+top_line_dump.json
+troas_output*.txt
+
+# IDE / Cursor agent state (local only)
+.cursor/
+
 # OS files
 .DS_Store
 Thumbs.db

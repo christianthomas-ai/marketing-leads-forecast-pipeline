@@ -1,8 +1,8 @@
 """Load the Marketing Model "Calendar" tab into Supabase (marketing_calendar).
 
-Reads two ranges from the live Google Sheet:
+Reads three ranges from the live Google Sheet:
 
-  1. Calendar!B2:I2500 — per-date rows:
+  1. Calendar!B2:I3000 — per-date rows:
        B = date (serial or ISO)
        D = week_start (Sunday of the week)
        E = week_number (Sheet's sequential index)
@@ -11,11 +11,17 @@ Reads two ranges from the live Google Sheet:
      (Columns C/F/G are recomputed in Python so the loader doesn't depend
       on the Sheet's exact DOW/formula semantics.)
 
-  2. Calendar!AI1:AM30 — holiday attribute lookup:
-       AI = holiday_name
-       AJ = same_day_of_week (bool)
-       AK = same_date        (bool; Easter uses a formula that resolves)
-       AL = full_week_impact (bool)
+  2. Calendar!R3:S3000 — test prep score release dates:
+       R = ACT Test Score Release (TRUE on tagged dates)
+       S = SAT Test Score Release (TRUE on tagged dates)
+     Lead impact dates (V/W in the Sheet) are derived in Python as
+     release_date + 7 days, matching the Sheet's formula chain.
+
+  3. Calendar!AC1:AF40 — holiday/event attribute lookup:
+       AC = holiday_name
+       AD = same_day_of_week (bool)
+       AE = same_date        (bool; Easter uses a formula that resolves)
+       AF = full_week_impact (bool)
 
 Writes to `marketing_calendar` using the soft-supersede pattern documented
 in `supabase/migrations/2026-04-22_marketing_calendar.sql`:
@@ -49,6 +55,9 @@ Dry run (read + diff; don't write):
 
 First-time backfill / re-run:
     python load_calendar.py --ingested-by christian.thomas
+
+Full wipe and reload (supersede all existing, insert fresh):
+    python load_calendar.py --replace-all --ingested-by christian.thomas
 
 Explicit supersede reason (appended to rows that actually change):
     python load_calendar.py \\
@@ -85,7 +94,8 @@ CALENDAR_TABLE = "marketing_calendar"
 # Calendar tab has ~2,200 data rows through end-of-2027; cap well above
 # that so the loader still picks up future-year extensions without edits.
 _DATE_RANGE = "B2:I3000"
-_LOOKUP_RANGE = "AI1:AM40"
+_RELEASE_RANGE = "R3:S3000"  # R=ACT release, S=SAT release (TRUE on tagged dates)
+_LOOKUP_RANGE = "AC1:AF40"
 
 # Names we classify as test_release rather than holiday. Driven by what
 # the Sheet's AI:AM table actually contains — confirmed by MODEL_STUDY_NOTES.md.
@@ -119,6 +129,11 @@ class CalendarRow:
     full_week_impact: Optional[bool]
     week_event_name: Optional[str]
     week_has_full_week_impact: bool
+    # Test prep score release / lead impact (parallel track to holidays)
+    score_release_type: Optional[str]         # 'SAT' | 'ACT' | None
+    score_impact_type: Optional[str]          # 'SAT' | 'ACT' | None (7 days after release)
+    week_score_impact_name: Optional[str]     # weekly fan-out of impact
+    week_has_score_impact: bool
 
 
 # ── HELPERS ──────────────────────────────────────────────────────────
@@ -166,7 +181,10 @@ def _parse_bool(cell: Any) -> Optional[bool]:
 
 _REF_NAME = {"AJ": "same_day_of_week",
              "AK": "same_date",
-             "AL": "full_week_impact"}
+             "AL": "full_week_impact",
+             "AD": "same_day_of_week",
+             "AE": "same_date",
+             "AF": "full_week_impact"}
 
 
 def _resolve_bool_or_formula(cell: Any, *, same_row_values: dict[str, Optional[bool]]) -> Optional[bool]:
@@ -206,13 +224,15 @@ def _resolve_bool_or_formula(cell: Any, *, same_row_values: dict[str, Optional[b
 
     # Pattern 1: =IF(<ref>=TRUE, FALSE, TRUE) == NOT <ref>
     m = re.match(
-        r"^=IF\(\s*(?P<ref>A[JKL])\d+\s*=\s*TRUE\s*,\s*FALSE\s*,\s*TRUE\s*\)$",
+        r"^=IF\(\s*(?P<ref>A[A-Z])\d+\s*=\s*TRUE\s*,\s*FALSE\s*,\s*TRUE\s*\)$",
         s,
         flags=re.IGNORECASE,
     )
     if m:
-        ref_name = _REF_NAME[m.group("ref").upper()]
-        ref_val = same_row_values.get(ref_name)
+        ref_key = m.group("ref").upper()
+        if ref_key not in _REF_NAME:
+            return None
+        ref_val = same_row_values.get(_REF_NAME[ref_key])
         if ref_val is None:
             return None
         return not ref_val
@@ -221,15 +241,19 @@ def _resolve_bool_or_formula(cell: Any, *, same_row_values: dict[str, Optional[b
     #         == (NOT <ref1>) AND (NOT <ref2>)
     m = re.match(
         r"^=IF\(\s*AND\(\s*"
-        r"(?P<ref1>A[JKL])\d+\s*=\s*FALSE\s*,\s*"
-        r"(?P<ref2>A[JKL])\d+\s*=\s*FALSE\s*"
+        r"(?P<ref1>A[A-Z])\d+\s*=\s*FALSE\s*,\s*"
+        r"(?P<ref2>A[A-Z])\d+\s*=\s*FALSE\s*"
         r"\)\s*,\s*TRUE\s*,\s*FALSE\s*\)$",
         s,
         flags=re.IGNORECASE,
     )
     if m:
-        r1 = same_row_values.get(_REF_NAME[m.group("ref1").upper()])
-        r2 = same_row_values.get(_REF_NAME[m.group("ref2").upper()])
+        k1 = m.group("ref1").upper()
+        k2 = m.group("ref2").upper()
+        if k1 not in _REF_NAME or k2 not in _REF_NAME:
+            return None
+        r1 = same_row_values.get(_REF_NAME[k1])
+        r2 = same_row_values.get(_REF_NAME[k2])
         if r1 is None or r2 is None:
             return None
         return (not r1) and (not r2)
@@ -386,11 +410,51 @@ def read_date_rows() -> list[tuple[date, Optional[str]]]:
     return rows
 
 
+def read_score_releases() -> dict[date, str]:
+    """Read Calendar!R:S and return {release_date: 'ACT'|'SAT'}.
+
+    Col R = ACT Test Score Release (TRUE on tagged dates).
+    Col S = SAT Test Score Release (TRUE on tagged dates).
+    We walk the same date chain as read_date_rows to resolve row -> date.
+    """
+    print(f"Reading score release dates from '{CALENDAR_WORKSHEET_NAME}'!{_RELEASE_RANGE}...")
+    grid = read_range(CALENDAR_WORKSHEET_NAME, _RELEASE_RANGE, render="formula")
+
+    # We need to align rows with the date chain. _RELEASE_RANGE starts at
+    # row 3 (first data row), same as _DATE_RANGE's data. We already know
+    # the date chain starts at 2022-01-02 in row 3 and increments by 1 day.
+    # Read the date column to get the anchor.
+    date_grid = read_range(CALENDAR_WORKSHEET_NAME, "B3:B3", render="formula")
+    anchor_raw = date_grid[0][0] if date_grid and date_grid[0] else None
+    try:
+        anchor_iso = parse_sheet_date(anchor_raw)
+        anchor = datetime.strptime(anchor_iso, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        _die(f"Cannot parse Calendar!B3 anchor date: {anchor_raw!r}")
+        return {}  # unreachable, _die exits
+
+    releases: dict[date, str] = {}
+    for i, row in enumerate(grid):
+        d = anchor + timedelta(days=i)
+        r_val = row[0] if len(row) > 0 else ""
+        s_val = row[1] if len(row) > 1 else ""
+        if r_val is True or (isinstance(r_val, str) and r_val.strip().upper() == "TRUE"):
+            releases[d] = "ACT"
+        if s_val is True or (isinstance(s_val, str) and s_val.strip().upper() == "TRUE"):
+            releases[d] = "SAT"
+
+    print(f"  Found {len(releases)} score release dates "
+          f"({len([v for v in releases.values() if v == 'SAT'])} SAT, "
+          f"{len([v for v in releases.values() if v == 'ACT'])} ACT).")
+    return releases
+
+
 # ── TRANSFORM ────────────────────────────────────────────────────────
 
 def build_calendar_rows(
     date_rows: list[tuple[date, Optional[str]]],
     lookup: dict[str, dict[str, Optional[bool]]],
+    score_releases: dict[date, str],
     *,
     strict: bool = False,
 ) -> list[CalendarRow]:
@@ -442,6 +506,12 @@ def build_calendar_rows(
             event_type = None
             sdow = sdate = fwi = None
 
+        # Test prep: release is tagged on the actual date; impact is 7 days later.
+        release_type = score_releases.get(d)
+        # Check if THIS date is the impact date for a release 7 days ago.
+        impact_source = d - timedelta(days=7)
+        impact_type = score_releases.get(impact_source)
+
         classified.append(CalendarRow(
             date=d.isoformat(),
             day_of_week=dow_name,
@@ -456,6 +526,10 @@ def build_calendar_rows(
             full_week_impact=fwi,
             week_event_name=None,             # filled in pass 2
             week_has_full_week_impact=False,  # filled in pass 2
+            score_release_type=release_type,
+            score_impact_type=impact_type,
+            week_score_impact_name=None,      # filled in pass 2
+            week_has_score_impact=False,       # filled in pass 2
         ))
 
     if unknown_events:
@@ -475,21 +549,28 @@ def build_calendar_rows(
         by_week[r.week_start].append(r)
 
     for week_start, rows in by_week.items():
-        # Candidate events in this week, in date order.
+        # ── Holiday fan-out ──
         events = sorted(
             (r for r in rows if r.event_name),
             key=lambda r: r.date,
         )
-        if not events:
-            continue
-        # "Primary" event for the week: earliest tagged date wins (matches
-        # Sheet!K). If you ever want to prefer full-week-impact events,
-        # change the key. We keep the Sheet-faithful rule.
-        primary_name = events[0].event_name
-        any_fwi = any(r.full_week_impact is True for r in events)
-        for r in rows:
-            r.week_event_name = primary_name
-            r.week_has_full_week_impact = any_fwi
+        if events:
+            primary_name = events[0].event_name
+            any_fwi = any(r.full_week_impact is True for r in events)
+            for r in rows:
+                r.week_event_name = primary_name
+                r.week_has_full_week_impact = any_fwi
+
+        # ── Test prep score impact fan-out ──
+        impacts = sorted(
+            (r for r in rows if r.score_impact_type),
+            key=lambda r: r.date,
+        )
+        if impacts:
+            primary_impact = impacts[0].score_impact_type
+            for r in rows:
+                r.week_score_impact_name = primary_impact
+                r.week_has_score_impact = True
 
     return classified
 
@@ -513,6 +594,8 @@ def fetch_current_calendar(*, tolerate_missing: bool = False) -> dict[str, dict[
         "id", "date", "event_name", "event_type",
         "same_day_of_week", "same_date", "full_week_impact",
         "week_event_name", "week_has_full_week_impact",
+        "score_release_type", "score_impact_type",
+        "week_score_impact_name", "week_has_score_impact",
     ])
     while True:
         resp = httpx.get(
@@ -567,6 +650,8 @@ _DIFF_FIELDS = (
     "event_name", "event_type",
     "same_day_of_week", "same_date", "full_week_impact",
     "week_event_name", "week_has_full_week_impact",
+    "score_release_type", "score_impact_type",
+    "week_score_impact_name", "week_has_score_impact",
 )
 
 
@@ -603,6 +688,10 @@ def insert_rows(rows: Iterable[CalendarRow], ingested_by: str) -> list[dict[str,
             "full_week_impact": r.full_week_impact,
             "week_event_name": r.week_event_name,
             "week_has_full_week_impact": r.week_has_full_week_impact,
+            "score_release_type": r.score_release_type,
+            "score_impact_type": r.score_impact_type,
+            "week_score_impact_name": r.week_score_impact_name,
+            "week_has_score_impact": r.week_has_score_impact,
             "ingested_by": ingested_by,
         }
         for r in rows
@@ -695,6 +784,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Error out on event_names not present in Calendar!AI:AM "
              "(default: warn and proceed with NULL classifiers).",
     )
+    p.add_argument(
+        "--replace-all",
+        action="store_true",
+        help="Supersede ALL existing current rows and insert fresh. "
+             "Use for full reloads after schema changes or sheet restructures.",
+    )
     return p
 
 
@@ -729,11 +824,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 1. Read Sheet.
     lookup = read_lookup_table()
     date_rows = read_date_rows()
+    score_releases = read_score_releases()
     if not date_rows:
         _die("No date rows read from the Calendar tab.")
 
     # 2. Transform.
-    calendar_rows = build_calendar_rows(date_rows, lookup, strict=args.strict)
+    calendar_rows = build_calendar_rows(date_rows, lookup, score_releases,
+                                        strict=args.strict)
 
     # 3. Diff against existing current rows. Dry-runs tolerate a missing
     # table so this loader can be validated before the migration is applied.
@@ -746,12 +843,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         if r.event_name:
             event_counts[r.event_name] += 1
     fwi_weeks = len({r.week_start for r in calendar_rows if r.week_has_full_week_impact})
+    score_impact_weeks = len({r.week_start for r in calendar_rows if r.week_has_score_impact})
+    release_count = sum(1 for r in calendar_rows if r.score_release_type)
+    impact_count = sum(1 for r in calendar_rows if r.score_impact_type)
 
     print("\n-- Summary --------------------------------------------")
     print(f"  Total dates:                {len(calendar_rows)}")
     print(f"  Dates with events:          {sum(1 for r in calendar_rows if r.event_name)}")
     print(f"  Distinct event names:       {len(event_counts)}")
     print(f"  Weeks with full-week-impact: {fwi_weeks}")
+    print(f"  Score release dates:        {release_count}")
+    print(f"  Score impact dates:         {impact_count}")
+    print(f"  Weeks with score impact:    {score_impact_weeks}")
     print(f"  Unchanged vs Supabase:      {unchanged}")
     print(f"  New inserts:                {len(to_insert)}")
     print(f"  Supersedes:                 {len(to_update)}")
@@ -759,6 +862,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("\n  Event counts (top 25):")
         for name, n in sorted(event_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:25]:
             print(f"    {name:<25} {n}")
+
+    # --replace-all: treat every existing row as needing supersede, and
+    # every incoming row as a fresh insert. Ignores the field-level diff.
+    if args.replace_all and existing:
+        reason = args.supersede_reason or "Full reload via --replace-all"
+        to_insert = calendar_rows
+        to_update = []
+        unchanged = 0
+        print(f"\n  --replace-all: will supersede all {len(existing)} existing rows "
+              f"and insert {len(to_insert)} fresh rows.")
 
     # Bail early if nothing to do.
     if not to_insert and not to_update:
@@ -800,20 +913,31 @@ def main(argv: Optional[list[str]] = None) -> int:
                       f"fwi={r.full_week_impact} week_fwi={r.week_has_full_week_impact}")
         return 0
 
-    # 4a. Insert NEW current rows (both first-time and replacement) FIRST,
-    # so we have replacement ids for superseded_by pointers.
-    to_write = list(to_insert) + [row for row, _ in to_update]
-    inserted = insert_rows(to_write, ingested_by=args.ingested_by)
-    print(f"\n  Inserted {len(inserted)} new rows.")
-
-    # 4b. If anything was superseded, flip old rows + point them at the
-    # smallest new id as a canonical replacement anchor.
-    if to_update:
-        old_ids = [prev["id"] for _, prev in to_update]
-        supersede_rows(old_ids, args.supersede_reason)
-        anchor_id = min(r["id"] for r in inserted)
-        patch_superseded_by(old_ids, anchor_id)
-        print(f"  Superseded {len(old_ids)} old rows (anchor id {anchor_id}).")
+    # 4a. --replace-all: supersede old rows FIRST to clear the unique
+    # index (one current row per date), then insert fresh.
+    if args.replace_all and existing:
+        old_ids = [r["id"] for r in existing.values()]
+        reason = args.supersede_reason or "Full reload via --replace-all"
+        supersede_rows(old_ids, reason)
+        print(f"\n  Superseded {len(old_ids)} old rows (--replace-all).")
+        to_write = calendar_rows
+        inserted = insert_rows(to_write, ingested_by=args.ingested_by)
+        print(f"  Inserted {len(inserted)} new rows.")
+        if inserted:
+            anchor_id = min(r["id"] for r in inserted)
+            patch_superseded_by(old_ids, anchor_id)
+            print(f"  Linked superseded rows to anchor id {anchor_id}.")
+    else:
+        # Normal path: insert first (new dates + replacements), then supersede.
+        to_write = list(to_insert) + [row for row, _ in to_update]
+        inserted = insert_rows(to_write, ingested_by=args.ingested_by)
+        print(f"\n  Inserted {len(inserted)} new rows.")
+        if to_update:
+            old_ids = [prev["id"] for _, prev in to_update]
+            supersede_rows(old_ids, args.supersede_reason)
+            anchor_id = min(r["id"] for r in inserted)
+            patch_superseded_by(old_ids, anchor_id)
+            print(f"  Superseded {len(old_ids)} old rows (anchor id {anchor_id}).")
 
     print("\nDone.")
     return 0

@@ -4,7 +4,7 @@
 Christian Thomas, Finance role at Varsity Tutors (subscription-based education business). New to Cursor, Python, and command line. Wants to do everything like a professional developer.
 
 ## Companion doc
-[`PROJECT_MANIFEST.md`](./PROJECT_MANIFEST.md) — the target-state architecture, sequenced roadmap (Phases 1–5), open questions, and terminology glossary. This file (`claude-md.md`) is the *current-state* reference; the manifest is the *direction*.
+[`PROJECT_MANIFEST.md`](./PROJECT_MANIFEST.md) — the target-state architecture, sequenced roadmap (Phases 1–5), open questions, and terminology glossary. This file (`AGENTS.md`) is the *current-state* reference; the manifest is the *direction*.
 
 ## Project Overview
 Automated weekly leads forecasting pipeline replacing a manual Google Sheets model. The system pulls lead data from Looker, stores it in Supabase, computes a baseline forecast, and pushes results to Google Sheets.
@@ -290,6 +290,54 @@ where:
 - Baseline forecast matches Sheet to within decimal rounding (total ties exactly when summed with full precision)
 - Full year 2026 VT Core forecast (weeks 15-52) ties to Sheet's unadjusted total
 
+## Adjustment Layers (applied by push_to_sheets.py)
+
+The baseline from `generate_forecast()` is a raw 50/50 blend of YoY and WoW.
+`push_to_sheets.py` applies two correction layers on top before pushing to Google Sheets.
+
+### Layer 1: Holiday Demand Adjustment
+
+Holidays like Thanksgiving shift week_numbers between years. When a reference
+year has the holiday in a different week, `avg_WoW_3yr` gets contaminated —
+often by the bounce-back week (e.g. 202% WoW averaging with two 47% holiday
+WoWs gives 98.5%, masking the holiday entirely).
+
+The correction has three parts:
+
+1. **Direct WoW correction** — for each holiday week, look up the individual
+   WoW ratios from the 3 reference years (2023/2024/2025). Keep only years
+   that had the same event in this week_number; drop contaminated years.
+   `wow_correction = 0.5 * prior_wk_bl * (holiday_avg_wow - actual_avg_wow)`
+
+2. **YoY correction (w_deseas)** — if PY was not the same holiday, the YoY
+   component is naive: `yoy_correction = 0.5 * baseline * (w_deseas - 1.0)`.
+   If PY had a different holiday, undo: `0.5 * baseline * (1/w_deseas - 1.0)`.
+
+3. **Cascade propagation** — corrections ripple forward through:
+   - `trailing_4wk_yoy`: corrected CY leads change the YoY ratios for the
+     next 1-4 weeks (e.g. fixing Thanksgiving flows into Christmas).
+   - `prior_wk_fcst`: corrected baseline feeds the WoW component of the next
+     week. Decays ~50% per step and converges within 5-6 weeks.
+
+**Important**: `avg_wow_3yr` is stored as a **percentage** (98.5, not 0.985)
+in the `leads_forecast` table. The cascade formula divides by 100.
+
+Holiday weightings (`w_deseas`) come from `holiday_weightings.csv`, generated
+by `analyze_holiday_weightings.py` from historical actuals.
+
+### Layer 2: Bid-Strategy Adjustment (tROAS + eLTV)
+
+Captures the lead impact of changing ROAS targets and shifting eLTV:
+```
+bid_delta_raw = (PY_tROAS / CY_tROAS) * (CY_eLTV / PY_eLTV)
+bid_delta     = 1.0 + 0.5 * (bid_delta_raw - 1.0)     # 50% dampen
+bid_adj_leads = holiday_adj_baseline * paid_mix * (bid_delta - 1)
+```
+
+Pre-computed by `analyze_troas_adjustment.py` and stored in
+`forecast_bid_adjustments` table. Applied only to the paid-channel share
+of leads (`paid_mix` from trailing actuals).
+
 ## What's Left to Build
 1. ~~**Finish Google Sheets connection**~~ — DONE; push_to_sheets.py runs daily via GitHub Actions
 2. ~~**Deploy to Netlify**~~ — SUPERSEDED; GitHub Actions handles scheduling now
@@ -297,9 +345,10 @@ where:
 4. **Audience mix cascade** — same methodology applied to audiences within each channel
 5. **Manual adjustment layer** — forecast_adj table in Supabase that the Sheet can write to
 6. ~~**Auto-run generate_forecast()**~~ — DONE; Edge Function calls it after ingest (see Edge Functions section)
-7. **Add spend forecasting** — separate from leads, at BU × channel level
-8. **`marketing_forecast_vintages` table** — memorialize each vintage at full grain for audit / accuracy tracking (live as of 2026-04-21; see `PHASE1_HANDOFF.md` and `supabase/migrations/2026-04-20_forecast_vintages.sql` + `2026-04-21_rename_marketing_tables.sql`)
-9. **Freshness / base-vs-final decomposition** — store forecast at each adjustment stage (base → +allocation → +holiday → +troas → +manual → final)
+7. **Add spend forecasting** — separate from leads, at BU x channel level
+8. ~~**`marketing_forecast_vintages` table**~~ — DONE; see `PHASE1_HANDOFF.md`
+9. ~~**Holiday + bid-strategy adjustment layers**~~ — DONE; see Adjustment Layers above
+10. **Freshness / base-vs-final decomposition** — store forecast at each adjustment stage
 
 ## Known Issues / Gotchas
 - Looker adds leading spaces to some JSON field names (" Reporting Date" instead of "Reporting Date")
@@ -310,3 +359,7 @@ where:
 - The Supabase free tier SQL editor has a default statement timeout; generate_forecast() runs fine within it now using the temp table approach
 - Week 1 WoW is NULL because there's no data before Week 1 of 2022 (the earliest year)
 - ISO week numbers do NOT match the custom week calendar — always use the week_calendar table
+- `avg_wow_3yr` and `trailing_4wk_yoy` in the `leads_forecast` table are stored as **percentages** (e.g. 98.5 = 98.5%), not ratios — any code using them as multipliers must divide by 100
+- Bounce-back weeks (week after a holiday) are not explicitly tagged in the calendar; their contamination in avg_WoW_3yr is handled indirectly through the cascade propagation from the holiday week's correction
+- All historical lookups in `apply_adjustments` (WoW ratios, cascade, prior-week baseline) must be keyed by **(week_number, week_year, Business)** — using just (week_number, week_year) will cross-contaminate BUs with very different lead volumes
+- GitHub Actions DST handling is automated: both CDT and CST crons fire daily; a DST guard step skips the run that doesn't land on the target Central hour
