@@ -95,7 +95,7 @@ git add \
   .github/workflows/memorialize_forecast.yml \
   PHASE1_HANDOFF.md \
   PROJECT_MANIFEST.md \
-  claude-md.md
+  AGENTS.md
 ```
 
 PR labels: `ai`, `cursor` (per workspace rules).

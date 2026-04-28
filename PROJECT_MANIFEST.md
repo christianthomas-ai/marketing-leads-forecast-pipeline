@@ -3,7 +3,7 @@
 ## Purpose of this document
 This is a working manifest for a multi-phase project to modernize a weekly leads forecasting model. It captures architectural decisions, current state, open questions, and a sequenced roadmap. Intended for use as persistent context in Cursor.
 
-See also: [`claude-md.md`](./claude-md.md) for the current-state architecture reference (tables, Edge Function behavior, timing chain, known gotchas).
+See also: [`AGENTS.md`](./AGENTS.md) for the current-state architecture reference (tables, Edge Function behavior, timing chain, known gotchas).
 
 ---
 

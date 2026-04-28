@@ -6,7 +6,7 @@ exam: ground understanding in source material, not guesswork.
 
 Pairs with:
 - `PROJECT_MANIFEST.md` (target-state architecture, forward-looking)
-- `claude-md.md` (current pipeline state)
+- `AGENTS.md` (current pipeline state)
 - `PHASE1_HANDOFF.md` (Phase 1 status, locks + reconciliation)
 
 Last updated: 2026-04-21
