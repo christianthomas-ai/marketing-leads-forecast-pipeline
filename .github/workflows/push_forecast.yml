@@ -2,25 +2,18 @@ name: Push Forecast to Google Sheets
 
 on:
   schedule:
-    # Both crons fire daily; the DST guard step (below) skips the run
-    # that doesn't land on 5 AM Central, so no manual swap is needed.
-    - cron: '17 10 * * *'  # 5:17 AM CT during CDT (UTC-5, Mar–Nov)
-    - cron: '17 11 * * *'  # 5:17 AM CT during CST (UTC-6, Nov–Mar)
+    # Target: ~5:17 AM Central, after Looker's 4:30 AM CT webhook.
+    # GitHub Actions cron is UTC and routinely delayed 1-6 hours, so
+    # the exact minute matters less than "morning, after Looker."
+    # DST shifts this by 1 hour (4:17 AM CT in CST vs 5:17 AM in CDT)
+    # which is fine — the pipeline is idempotent either way.
+    - cron: '17 10 * * *'  # 10:17 UTC = 5:17 AM CDT / 4:17 AM CST
   workflow_dispatch:  # allows manual trigger from GitHub Actions tab
 
 jobs:
   push-forecast:
     runs-on: ubuntu-latest
     steps:
-      - name: DST guard — skip if not 5 AM Central
-        if: github.event_name == 'schedule'
-        run: |
-          HOUR=$(TZ=America/Chicago date +%H)
-          if [ "$HOUR" != "05" ]; then
-            echo "Current Central hour is $HOUR, not 05. Skipping this DST duplicate."
-            exit 1
-          fi
-
       - name: Checkout repo
         uses: actions/checkout@v5
 

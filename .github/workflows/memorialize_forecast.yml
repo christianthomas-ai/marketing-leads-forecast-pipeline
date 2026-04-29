@@ -4,7 +4,7 @@ name: Memorialize Locked Forecast
 # Once the marketing_forecast_vintages pipeline has proven itself, uncomment
 # the `schedule` block below to run automatically every Monday at 7:00 AM CT
 # (after the 6 AM Apps Script recalc, before the 9 AM arrival deadline).
-# Both crons fire; the DST guard step skips the wrong one automatically.
+# DST shifts this by 1 hour (6 AM CT in CST vs 7 AM in CDT) which is fine.
 #
 # Normal run: pick plan_type (SOP / OP / SOPM). plan_start_date is OPTIONAL —
 # leave blank and the script picks the newest plan_start_date in the locked
@@ -53,22 +53,12 @@ on:
 
   # Uncomment once the shadow period is over and trust is established:
   # schedule:
-  #   - cron: '0 12 * * 1'  # 7:00 AM CT Mondays during CDT (UTC-5)
-  #   - cron: '0 13 * * 1'  # 7:00 AM CT Mondays during CST (UTC-6)
+  #   - cron: '0 12 * * 1'  # 12:00 UTC = 7:00 AM CDT / 6:00 AM CST Mondays
 
 jobs:
   memorialize:
     runs-on: ubuntu-latest
     steps:
-      - name: DST guard — skip if not 7 AM Central
-        if: github.event_name == 'schedule'
-        run: |
-          HOUR=$(TZ=America/Chicago date +%H)
-          if [ "$HOUR" != "07" ]; then
-            echo "Current Central hour is $HOUR, not 07. Skipping this DST duplicate."
-            exit 1
-          fi
-
       - name: Checkout repo
         uses: actions/checkout@v5
 

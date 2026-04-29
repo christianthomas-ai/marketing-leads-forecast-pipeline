@@ -79,21 +79,20 @@ Supabase for audit and accuracy tracking. It is currently **manual trigger only*
    be in the run log (usually a missing plan in the sheet or a validation issue).
 
 **Enabling automatic weekly runs**: The schedule is ready but commented out in
-`memorialize_forecast.yml`. To activate it, uncomment these two lines:
+`memorialize_forecast.yml`. To activate it, uncomment this line:
 
 ```yaml
   schedule:
-    - cron: '0 12 * * 1'  # 7:00 AM CT Mondays during CDT (UTC-5)
-    - cron: '0 13 * * 1'  # 7:00 AM CT Mondays during CST (UTC-6)
+    - cron: '0 12 * * 1'  # 12:00 UTC = 7:00 AM CDT / 6:00 AM CST Mondays
 ```
 
-A DST guard step is already in the workflow — both crons fire but only the one
-landing on 7 AM Central actually runs. No manual cron edits needed for
-daylight saving time.
+Note: GitHub Actions cron is UTC and routinely runs 1-6 hours late, so the
+exact minute is aspirational. The DST shift (1 hour) is negligible compared
+to GitHub's scheduling jitter.
 
 ## GitHub Actions
 
-- **Push Forecast** (`push_forecast.yml`): Daily cron + manual dispatch. Pushes adjusted forecast to Sheets. DST-safe (dual cron + guard).
+- **Push Forecast** (`push_forecast.yml`): Daily cron + manual dispatch. Pushes adjusted forecast to Sheets.
 - **Memorialize Forecast** (`memorialize_forecast.yml`): Manual dispatch only (schedule ready to uncomment). Locks a forecast vintage + runs reconciliation.
 
 ## Deeper Documentation
