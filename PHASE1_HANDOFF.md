@@ -106,7 +106,7 @@ These predate Phase 1 and are blocked on Supabase org permissions. They don't
 block Phase 1, but both should get unblocked together when you have a minute
 with someone who has admin on the Supabase org:
 
-- Fresh GitHub PAT stored as Supabase `GITHUB_PAT` secret.
+- Fresh GitHub PAT stored as a Supabase vault secret (name in dashboard).
 - `supabase functions download bright-worker` + add the ~15-line GitHub
   `workflow_dispatch` call + redeploy.
 - Move `push_forecast.yml` cron from 5:17 AM → 5:43 AM CT as the safety net

@@ -80,7 +80,7 @@ College & Grad, High School, ELD, Adult & Other, Prof Certs
 ### Project
 - Project name: Business Planning
 - Branch: main (PRODUCTION)
-- Project URL: https://tuhuajzagxuvkxxowsxo.supabase.co
+- Project URL: (see SUPABASE_URL in .env)
 - Region: us-east-1
 
 ### Tables
@@ -172,7 +172,7 @@ PL/pgSQL function that:
 ### Edge Functions
 
 #### looker-leads-ingest (slug: bright-worker)
-- URL: https://tuhuajzagxuvkxxowsxo.supabase.co/functions/v1/bright-worker
+- URL: ${SUPABASE_URL}/functions/v1/bright-worker
 - JWT verification: OFF (required for Looker webhooks)
 - Receives Looker webhook POST with JSON — Simple format
 - Trims all key names (Looker adds leading spaces to some)
@@ -239,7 +239,7 @@ where:
 ## Google Sheets Connection (in progress)
 
 ### Google Cloud Setup
-- Project: My First Project (under varsitytutors.com)
+- Project: (see Google Cloud console — shared with team)
 - APIs enabled: Google Sheets API, Google Drive API
 - Service account: forecast-sheets@aerobic-star-492815-f3.iam.gserviceaccount.com
 - Credentials file: credentials.json (JSON key, stored locally in forecast-pipeline folder)
