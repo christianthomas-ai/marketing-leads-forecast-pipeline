@@ -26,8 +26,8 @@ Looker webhook (daily 4:30 AM CT)
 ## Local Setup
 
 ```bash
-git clone https://github.com/christianthomas-ai/forecast-pipeline.git
-cd forecast-pipeline
+git clone https://github.com/christianthomas-ai/marketing-leads-forecast-pipeline.git
+cd marketing-leads-forecast-pipeline
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
