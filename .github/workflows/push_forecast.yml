@@ -1,0 +1,37 @@
+name: Push Forecast to Google Sheets
+
+on:
+  schedule:
+    # Target: ~5:17 AM Central, after Command Center actuals refresh.
+    # GitHub Actions cron is UTC and routinely delayed 1-6 hours, so
+    # the exact minute matters less than "morning, after actuals land."
+    # DST shifts this by 1 hour (4:17 AM CT in CST vs 5:17 AM in CDT)
+    # which is fine — the pipeline is idempotent either way.
+    - cron: '17 10 * * *'  # 10:17 UTC = 5:17 AM CDT / 4:17 AM CST
+  workflow_dispatch:  # allows manual trigger from GitHub Actions tab
+
+jobs:
+  push-forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write Google credentials file
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+
+      - name: Run push_to_sheets.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python push_to_sheets.py
