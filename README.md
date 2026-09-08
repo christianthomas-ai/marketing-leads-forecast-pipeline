@@ -5,16 +5,16 @@ Automated weekly leads forecasting pipeline for Varsity Tutors marketing. Replac
 ## Architecture
 
 ```
-Looker webhook (daily 4:30 AM CT)
-  -> Supabase Edge Function (bright-worker)
-     -> wipes + reloads leads_weekly_actuals
-     -> calls generate_forecast() RPC
+Command Center actuals (hourly Starburst leads + daily Looker KPI)
+  -> public compatibility views (leads_weekly_actuals, weekly_leads_by_bu)
   -> GitHub Actions cron (daily 5:17 AM CT)
      -> push_to_sheets.py
         -> re-runs generate_forecast()
         -> applies holiday + bid-strategy adjustments
         -> writes to Google Sheets "Supabase Forecast" tab
 ```
+
+The original Looker `bright-worker` wipe-reload was retired in July 2026. Actuals now read from Business Planning tables that already refresh (`cc_starburst_leads_daily_current`, `cc_kpi_all_business_looker`). See `supabase/migrations/2026-09-08_restore_public_forecast_compat.sql`.
 
 ## Prerequisites
 
